@@ -26,5 +26,11 @@
     <ClInclude Include="DynlecEncrypt.h">
       <Filter>source\dynlec</Filter>
     </ClInclude>
+    <ClInclude Include="DynlecLibraries.h">
+      <Filter>source\dynlec</Filter>
+    </ClInclude>
+    <ClInclude Include="DynlecCommon.h">
+      <Filter>source\dynlec</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

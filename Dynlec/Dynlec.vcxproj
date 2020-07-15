@@ -151,7 +151,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Dynlec.h" />
+    <ClInclude Include="DynlecCommon.h" />
     <ClInclude Include="DynlecEncrypt.h" />
+    <ClInclude Include="DynlecLibraries.h" />
     <ClInclude Include="DynlecQuick.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

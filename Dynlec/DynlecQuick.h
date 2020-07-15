@@ -2,7 +2,9 @@
 
 #include "DynlecEncrypt.h"
 
+#ifndef __INTELLISENSE__
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <Windows.h>
 #include <libloaderapi.h>
 
@@ -16,7 +18,7 @@
 #define DYNLEC_QUICK_LIBR(alias, path) \
 	struct alias \
 	{ \
-		static inline const char* Name = DYNLEC_CT_ENCRYPT(path); \
+		static inline DYNLEC_CT_ENCRYPT_INPLACE(Name, path); \
 		static inline HMODULE Module; \
 	}
 
@@ -31,7 +33,7 @@
 		using Definition = definition; \
 		typedef library Library;\
 		typedef ::Dynlec::ReturnTypeExtractor<Definition>::type Return; \
-		static inline const char* Name = DYNLEC_CT_ENCRYPT(symbol); \
+		static inline DYNLEC_CT_ENCRYPT_INPLACE(Name, symbol); \
 		static inline FARPROC Procedure; \
 	}
 
@@ -42,7 +44,6 @@ namespace Dynlec
 	{
 		static constexpr bool valid = false;
 	};
-
 
 	template <typename Return, typename... Arguments>
 	struct ReturnTypeExtractor<Return(*)(Arguments...)>

@@ -1,10 +1,9 @@
 #include "Dynlec.h"
-#include "DynlecQuick.h"
+#include "DynlecLibraries.h"
 
 #include <iostream>
 #include <vector>
 
-/*
 class Volume
 {
 public:
@@ -12,20 +11,25 @@ public:
 	{
 		std::vector<Volume> volumes;
 
-		volumes.emplace_back();
-		Volume& volume = volumes.back();
-
-		HANDLE handle = FindFirstVolumeA(
-			volume.path,
+		HANDLE handle = DL::Call<DL::FindFirstVolumeA>(
+			volumes.emplace_back().path,
 			MAX_PATH);
 
-		while (true)
-		{
-			// FindNextVolumeW(
-			//	handle,);
-		}
+		while (DL::Call<DL::FindNextVolumeA>(
+			handle,
+			volumes.emplace_back().path,
+			MAX_PATH));
 
-		FindVolumeClose(handle);
+		volumes.pop_back();
+
+#ifdef _DEBUG
+		if (GetLastError() != ERROR_NO_MORE_FILES)
+		{
+			std::cout << "FindNextVolume failed: " << GetLastError() << std::endl;
+		}
+#endif
+
+		DL::Call<DL::FindVolumeClose>(handle);
 
 		return volumes;
 	}
@@ -34,22 +38,19 @@ public:
 	{
 	}
 
+	const char* getPath() const
+	{
+		return path;
+	}
+
 private:
 	char path[MAX_PATH];
 };
-*/
-
-namespace Dynlec
-{
-	DYNLEC_QUICK_LIBR(User32Library, "User32.dll");
-	DYNLEC_QUICK_FUNC(
-		MessageBoxA,
-		User32Library,
-		"MessageBoxA",
-		int(__stdcall*)(HWND, LPCSTR, LPCSTR, UINT));
-}
 
 int main()
 {
-	DL::Call<DL::MessageBoxA>((HWND) NULL, "Hello world", "Title", MB_OK);
+	std::vector<Volume> volumes = Volume::Volumes();
+
+	for (Volume& volume : volumes)
+		std::cout << "V: " << volume.getPath() << std::endl;
 }
