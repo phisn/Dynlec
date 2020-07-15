@@ -1,8 +1,10 @@
+#include "Dynlec.h"
+#include "DynlecQuick.h"
+
 #include <iostream>
 #include <vector>
 
-#include <Windows.h>
-
+/*
 class Volume
 {
 public:
@@ -35,12 +37,19 @@ public:
 private:
 	char path[MAX_PATH];
 };
+*/
+
+namespace Dynlec
+{
+	DYNLEC_QUICK_LIBR(User32Library, "User32.dll");
+	DYNLEC_QUICK_FUNC(
+		MessageBoxA,
+		User32Library,
+		"MessageBoxA",
+		int(__stdcall*)(HWND, LPCSTR, LPCSTR, UINT));
+}
 
 int main()
 {
-	HMODULE library = LoadLibraryA("lib");
-	FARPROC proc = GetProcAddress(
-		library,
-		"");
-
+	DL::Call<DL::MessageBoxA>((HWND) NULL, "Hello world", "Title", MB_OK);
 }

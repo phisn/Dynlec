@@ -4,24 +4,27 @@
     <Filter Include="source">
       <UniqueIdentifier>{4b2971a8-8a0f-4121-9828-f0d4bca866e9}</UniqueIdentifier>
     </Filter>
+    <Filter Include="source\dynlec">
+      <UniqueIdentifier>{6840e504-64db-4689-be74-ba98bd7e7ffe}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Dynlec.cpp">
-      <Filter>source</Filter>
-    </ClCompile>
     <ClCompile Include="main.cpp">
       <Filter>source</Filter>
     </ClCompile>
+    <ClCompile Include="Dynlec.cpp">
+      <Filter>source\dynlec</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="DynlecQuick.h">
+      <Filter>source\dynlec</Filter>
+    </ClInclude>
     <ClInclude Include="Dynlec.h">
-      <Filter>source</Filter>
+      <Filter>source\dynlec</Filter>
     </ClInclude>
     <ClInclude Include="DynlecEncrypt.h">
-      <Filter>source</Filter>
-    </ClInclude>
-    <ClInclude Include="DynlecQuick.h">
-      <Filter>source</Filter>
+      <Filter>source\dynlec</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

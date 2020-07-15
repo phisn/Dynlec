@@ -1,6 +1,64 @@
 #pragma once
 
-namespace Dynlec
-{
+// use DYNLEC_CT_ENCRYPT to encrypt strings at compile time
+#define DYNLEC_CT_ENCRYPT(input) [] { \
+        static char buffer[sizeof(input)]; \
+        constexpr CTEncrypt<sizeof(input), __COUNTER__> cte(input); \
+        return cte.decryptTo(buffer); \
+    }();
 
-}
+#ifndef DYNLEC_CT_ENCRYPT_SEED
+constexpr char Dynlec_CT_Encrypt_StaticTime[9] = __TIME__;
+#define DYNLEC_CT_ENCRYPT_SEED (\
+    ((unsigned long long) Dynlec_CT_Encrypt_StaticTime[7] - '0') * 1ull    + ((unsigned long long) Dynlec_CT_Encrypt_StaticTime[6] - '0') * 10ull  + \
+    ((unsigned long long) Dynlec_CT_Encrypt_StaticTime[4] - '0') * 60ull   + ((unsigned long long) Dynlec_CT_Encrypt_StaticTime[3] - '0') * 600ull + \
+    ((unsigned long long) Dynlec_CT_Encrypt_StaticTime[1] - '0') * 3600ull + ((unsigned long long) Dynlec_CT_Encrypt_StaticTime[0] - '0') * 36000ull)
+#endif
+
+#ifndef DYNLEC_CT_ENCRYPT_ROUNDS
+#define DYNLEC_CT_ENCRYPT_ROUNDS 10
+#endif
+
+template <unsigned size, unsigned counter = 0>
+class CTEncrypt 
+{
+public:
+    inline constexpr CTEncrypt(const char* string)
+    {
+        for (unsigned long long i = 0u; i < size; ++i)
+            input[i] = string[i] ^ random_character(i);
+    }
+
+    char* decryptTo(char (&buffer)[size]) const
+    {
+        for (unsigned long long i = 0; i < length; i++) {
+            buffer[i] = input[i] ^ random_character(i);
+        }
+        buffer[length] = '\0';
+        return buffer;
+    }
+
+private:
+    const unsigned length = (size - 1);
+    mutable char input[size] = { };
+
+    constexpr char random_character(signed long long index) const
+    {
+        return static_cast<char>(linear_congruent_generator(
+            DYNLEC_CT_ENCRYPT_ROUNDS,
+            DYNLEC_CT_ENCRYPT_SEED + size * index + counter) % (0xFF + 1));
+    }
+
+    constexpr unsigned long long linear_congruent_generator(
+        unsigned long long rounds,
+        unsigned long long seed) const
+    {
+        return 1013904223ull + (1664525ull * (
+            (rounds > 0)
+                ? linear_congruent_generator(rounds - 1, seed)
+                : (seed))
+            ) % 0xFFFFFFFF;
+    }
+};
+
+static_assert(sizeof(char) == 1, "DynlecEncrypt is made for character size of 1");

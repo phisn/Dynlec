@@ -5,6 +5,8 @@
 #include <type_traits>
 #include <vector>
 
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 #include <libloaderapi.h>
 
 namespace Dynlec
@@ -12,10 +14,10 @@ namespace Dynlec
 	template <typename Function, typename... Arguments>
 	typename Function::Return Call(Arguments&&... arguments)
 	{
-		static_assert(std::is_same_v<
+		/*static_assert(std::is_same_v<
 			decltype(Call<Function, Arguments...>),
 			typename Function::Definition>,
-			"Invalid arguments in 'Dynlec' call");
+			"Invalid arguments in 'Dynlec' call");*/
 
 		if (Function::Library::Module == NULL)
 		{
@@ -29,7 +31,7 @@ namespace Dynlec
 				Function::Name);
 		}
 
-		return ((Function::Definition) Function::Procedure)(arguments...);
+		return ((typename Function::Definition) Function::Procedure)(arguments...);
 	}
 }
 

@@ -1,5 +1,9 @@
 #pragma once
 
+#include "DynlecEncrypt.h"
+
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 #include <libloaderapi.h>
 
 // Usage example:
@@ -12,9 +16,9 @@
 #define DYNLEC_QUICK_LIBR(alias, path) \
 	struct alias \
 	{ \
-		static constexpr char Name[] = path; \
-		static HMODULE Module; \
-	};
+		static inline const char* Name = DYNLEC_CT_ENCRYPT(path); \
+		static inline HMODULE Module; \
+	}
 
 // shortcut for defining dynlec functions
 // symbol has to be a cstring
@@ -27,8 +31,9 @@
 		using Definition = definition; \
 		typedef library Library;\
 		typedef ::Dynlec::ReturnTypeExtractor<Definition>::type Return; \
-		static constexpr char Name[] = symbol; \
-	};
+		static inline const char* Name = DYNLEC_CT_ENCRYPT(symbol); \
+		static inline FARPROC Procedure; \
+	}
 
 namespace Dynlec
 {
@@ -38,22 +43,9 @@ namespace Dynlec
 		static constexpr bool valid = false;
 	};
 
-	template <typename Return, typename... Arguments>
-	struct ReturnTypeExtractor<Return(__stdcall *)(Arguments...)>
-	{
-		static constexpr bool valid = true;
-		typedef Return type;
-	};
 
 	template <typename Return, typename... Arguments>
-	struct ReturnTypeExtractor<Return(__cdecl *)(Arguments...)>
-	{
-		static constexpr bool valid = true;
-		typedef Return type;
-	};
-
-	template <typename Return, typename... Arguments>
-	struct ReturnTypeExtractor<Return(__fastcall *)(Arguments...)>
+	struct ReturnTypeExtractor<Return(*)(Arguments...)>
 	{
 		static constexpr bool valid = true;
 		typedef Return type;
