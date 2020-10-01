@@ -146,14 +146,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Dynlec.cpp" />
+    <ClCompile Include="DynlecLoader.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Dynlec.h" />
+    <ClInclude Include="DynlecCaller.h" />
     <ClInclude Include="DynlecCommon.h" />
+    <ClInclude Include="DynlecDebug.h" />
     <ClInclude Include="DynlecEncrypt.h" />
     <ClInclude Include="DynlecLibraries.h" />
+    <ClInclude Include="DynlecLoader.h" />
     <ClInclude Include="DynlecQuick.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -1,7 +1,9 @@
 #pragma once
 
 #ifdef _DEBUG
+#include <fstream>
 #include <iostream>
+#include <string>
 #endif
 
 #ifndef __INTELLISENSE__
@@ -12,4 +14,3 @@
 
 #include <functional>
 #include <type_traits>
-#include <vector>

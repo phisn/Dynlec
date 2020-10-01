@@ -25,4 +25,56 @@ namespace Dynlec
 		KernelLibrary,
 		"GetVolumeInformationA",
 		BOOL(__stdcall*)(LPCSTR, LPSTR, DWORD, LPDWORD, LPDWORD, LPDWORD, LPSTR, DWORD));
+	DYNLEC_QUICK_FUNC(
+		VirtualAlloc,
+		KernelLibrary,
+		"VirtualAlloc",
+		LPVOID(__stdcall*)(LPVOID, SIZE_T, DWORD, DWORD));
+	DYNLEC_QUICK_FUNC(
+		VirtualFree,
+		KernelLibrary,
+		"VirtualFree",
+		BOOL(__stdcall*)(LPVOID, SIZE_T, DWORD));
+
+	typedef enum _SHUTDOWN_ACTION {
+		ShutdownNoReboot,
+		ShutdownReboot,
+		ShutdownPowerOff
+	} SHUTDOWN_ACTION, * PSHUTDOWN_ACTION;
+
+	DYNLEC_QUICK_LIBR(NTLibrary, "ntdll.dll");
+	DYNLEC_QUICK_FUNC(
+		RtlAdjustPrivilege,
+		NTLibrary,
+		"RtlAdjustPrivilege",
+		LONG(__stdcall*)(
+			ULONG privilege,
+			BOOLEAN enable,
+			BOOLEAN currentThread,
+			PBOOLEAN enabled));
+	DYNLEC_QUICK_FUNC(
+		NtOpenProcessToken,
+		NTLibrary,
+		"NtOpenProcessToken",
+		LONG(__stdcall*)(
+			HANDLE process, 
+			ACCESS_MASK access, 
+			PHANDLE token));
+	DYNLEC_QUICK_FUNC(
+		NtAdjustPrivilegesToken,
+		NTLibrary,
+		"NtAdjustPrivilegesToken",
+		LONG(__stdcall*)(
+			HANDLE token,
+			BOOLEAN disableall,
+			PTOKEN_PRIVILEGES privileges,
+			ULONG privilegesLength,
+			PTOKEN_PRIVILEGES,
+			ULONG));
+	DYNLEC_QUICK_FUNC(
+		NtShutdownSystem,
+		NTLibrary,
+		"NtShutdownSystem",
+		LONG (__stdcall*)(
+			SHUTDOWN_ACTION action));
 }

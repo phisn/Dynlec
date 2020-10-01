@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DynlecCommon.h"
+#include "DynlecDebug.h"
 #include "DynlecEncrypt.h"
 
 /*
@@ -26,9 +27,6 @@ Call example:
 
 namespace Dynlec
 {
-	extern std::function<void(DWORD, const char*)> HandleFailedLoadLibrary;
-	extern std::function<void(DWORD, const char*)> HandleFailedGetProcAddress;
-
 	template <typename T>
 	const char* Obtain(T* value)
 	{
@@ -55,9 +53,7 @@ namespace Dynlec
 			if (Function::Library::Module == NULL)
 			{
 				if (HandleFailedLoadLibrary)
-					HandleFailedLoadLibrary(
-						GetLastError(),
-						Obtain(&Function::Library::Name));
+					DYNLEC_HANDLE_FATAL(std::to_string(GetLastError()) + ':' + Function::Library::Name);
 			}
 		}
 
@@ -70,16 +66,10 @@ namespace Dynlec
 			if (Function::Procedure == NULL)
 			{
 				if (HandleFailedGetProcAddress)
-					HandleFailedGetProcAddress(
-						GetLastError(),
-						Obtain(&Function::Name));
+					DYNLEC_HANDLE_FATAL(std::to_string(GetLastError()) + ':' + Function::Name);
 			}
 		}
 
 		return ((typename Function::Definition) Function::Procedure)(arguments...);
 	}
 }
-
-#ifndef DYNLEC_ALIAS_HIDE
-namespace DL = Dynlec;
-#endif

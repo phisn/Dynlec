@@ -12,15 +12,12 @@
     <ClCompile Include="main.cpp">
       <Filter>source</Filter>
     </ClCompile>
-    <ClCompile Include="Dynlec.cpp">
+    <ClCompile Include="DynlecLoader.cpp">
       <Filter>source\dynlec</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DynlecQuick.h">
-      <Filter>source\dynlec</Filter>
-    </ClInclude>
-    <ClInclude Include="Dynlec.h">
       <Filter>source\dynlec</Filter>
     </ClInclude>
     <ClInclude Include="DynlecEncrypt.h">
@@ -30,6 +27,15 @@
       <Filter>source\dynlec</Filter>
     </ClInclude>
     <ClInclude Include="DynlecCommon.h">
+      <Filter>source\dynlec</Filter>
+    </ClInclude>
+    <ClInclude Include="DynlecLoader.h">
+      <Filter>source\dynlec</Filter>
+    </ClInclude>
+    <ClInclude Include="DynlecDebug.h">
+      <Filter>source\dynlec</Filter>
+    </ClInclude>
+    <ClInclude Include="DynlecCaller.h">
       <Filter>source\dynlec</Filter>
     </ClInclude>
   </ItemGroup>
