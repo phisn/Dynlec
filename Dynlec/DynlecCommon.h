@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <sstream>
 #endif
 
 #ifndef __INTELLISENSE__

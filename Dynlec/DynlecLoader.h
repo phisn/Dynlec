@@ -31,5 +31,10 @@ namespace Dynlec
         POINTER_LIST* blockedMemory;
 
         void FreePointerList(POINTER_LIST* head);
+        bool CopySections(
+            const unsigned char* data, 
+            size_t size, 
+            PIMAGE_NT_HEADERS old_headers);
+        bool PerformBaseRelocation(ptrdiff_t delta);
 	};
 }

@@ -17,34 +17,32 @@ typedef int (__stdcall* ExeEntryProc)(void);
 #define IMAGE_SIZEOF_BASE_RELOCATION (sizeof(IMAGE_BASE_RELOCATION))
 #endif
 
+#define GET_HEADER_DICTIONARY(module, idx)  &(module)->headers->OptionalHeader.DataDirectory[idx]
+
 namespace Dynlec
 {
-    static inline uintptr_t AlignValueDown(uintptr_t value, uintptr_t alignment) {
+    inline uintptr_t AlignValueDown(uintptr_t value, uintptr_t alignment) {
         return value & ~(alignment - 1);
     }
 
-    static inline LPVOID AlignAddressDown(LPVOID address, uintptr_t alignment) {
+    inline LPVOID AlignAddressDown(LPVOID address, uintptr_t alignment) {
         return (LPVOID)AlignValueDown((uintptr_t)address, alignment);
     }
 
-    static inline size_t AlignValueUp(size_t value, size_t alignment) {
+    inline size_t AlignValueUp(size_t value, size_t alignment) {
         return (value + alignment - 1) & ~(alignment - 1);
     }
 
-    static inline void* OffsetPointer(void* data, ptrdiff_t offset) {
+    inline void* OffsetPointer(void* data, ptrdiff_t offset) {
         return (void*)((uintptr_t)data + offset);
     }
 
     Library::Library(const char* binary, size_t size)
     {
-        PIMAGE_DOS_HEADER dos_header;
-        PIMAGE_NT_HEADERS old_header;
-        unsigned char* codeBase, * headers;
+        unsigned char* codeBase, * headersBuffer;
         ptrdiff_t locationDelta;
         SYSTEM_INFO sysInfo;
-        PIMAGE_SECTION_HEADER section;
         unsigned long i;
-        size_t optionalSectionSize;
         size_t lastSectionEnd = 0;
         size_t alignedImageSize;
 
@@ -54,7 +52,7 @@ namespace Dynlec
             return;
         }
 
-        dos_header = (PIMAGE_DOS_HEADER) binary;
+        PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER) binary;
         if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) 
         {
             DYNLEC_HANDLE_FATAL("Invalid dos signature");
@@ -67,7 +65,7 @@ namespace Dynlec
             return;
         }
 
-        old_header = (PIMAGE_NT_HEADERS) & ((const unsigned char*)(binary))[dos_header->e_lfanew];
+        PIMAGE_NT_HEADERS old_header = (PIMAGE_NT_HEADERS) & ((const unsigned char*)(binary))[dos_header->e_lfanew];
         if (old_header->Signature != IMAGE_NT_SIGNATURE) 
         {
             DYNLEC_HANDLE_FATAL("Invalid nt signature");
@@ -87,8 +85,8 @@ namespace Dynlec
             return;
         }
 
-        section = IMAGE_FIRST_SECTION(old_header);
-        optionalSectionSize = old_header->OptionalHeader.SectionAlignment;
+        PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(old_header);
+        size_t optionalSectionSize = old_header->OptionalHeader.SectionAlignment;
         for (i = 0; i < old_header->FileHeader.NumberOfSections; i++, section++) 
         {
             size_t endOfSection = section->SizeOfRawData == 0
@@ -175,32 +173,32 @@ namespace Dynlec
         }
 
         // commit memory for headers
-        headers = (unsigned char*) Dynlec::Call<Dynlec::VirtualAlloc>(
+        headersBuffer = (unsigned char*) Dynlec::Call<Dynlec::VirtualAlloc>(
             codeBase,
             old_header->OptionalHeader.SizeOfHeaders,
             MEM_COMMIT,
             PAGE_READWRITE);
 
         // copy PE header to code
-        memcpy(headers, dos_header, old_header->OptionalHeader.SizeOfHeaders);
-        headers = (PIMAGE_NT_HEADERS) & ((const unsigned char*)(headers))[dos_header->e_lfanew];
+        memcpy(headersBuffer, dos_header, old_header->OptionalHeader.SizeOfHeaders);
+        headers = (PIMAGE_NT_HEADERS) & ((const unsigned char*)(headersBuffer))[dos_header->e_lfanew];
 
         // update position
         headers->OptionalHeader.ImageBase = (uintptr_t)codeBase;
 
         // copy sections from DLL file block to new memory location
-        if (
-            !CopySections((const unsigned char*)data, size, old_header, result)) {
+        if (!CopySections((const unsigned char*) binary, size, old_header)) 
+        {
             goto error;
         }
 
         // adjust base address of imported data
-        locationDelta = (ptrdiff_t)(result->headers->OptionalHeader.ImageBase - old_header->OptionalHeader.ImageBase);
+        locationDelta = (ptrdiff_t)(this->headers->OptionalHeader.ImageBase - old_header->OptionalHeader.ImageBase);
         if (locationDelta != 0) {
-            result->isRelocated = PerformBaseRelocation(result, locationDelta);
+            isRelocated = PerformBaseRelocation(result, locationDelta);
         }
         else {
-            result->isRelocated = TRUE;
+            isRelocated = TRUE;
         }
 
         // load required dlls and adjust function table of imports
@@ -260,5 +258,117 @@ namespace Dynlec
             free(node);
             node = next;
         }
+    }
+
+    bool Library::CopySections(
+        const unsigned char* data, 
+        size_t size, 
+        PIMAGE_NT_HEADERS old_headers)
+    {
+        unsigned char* dest;
+        PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(headers);
+        for (int i = 0; i < headers->FileHeader.NumberOfSections; i++, section++) 
+        {
+            if (section->SizeOfRawData == 0) 
+            {
+                // section doesn't contain data in the dll itself, but may define
+                // uninitialized data
+                int section_size = old_headers->OptionalHeader.SectionAlignment;
+                if (section_size > 0) {
+                    dest = (unsigned char*) Dynlec::Call<Dynlec::VirtualAlloc>(
+                        codeBase + section->VirtualAddress,
+                        section_size,
+                        MEM_COMMIT,
+                        PAGE_READWRITE);
+
+                    if (dest == NULL)
+                        return false;
+                    
+                    // Always use position from file to support alignments smaller
+                    // than page size (allocation above will align to page size).
+                    dest = codeBase + section->VirtualAddress;
+                    // NOTE: On 64bit systems we truncate to 32bit here but expand
+                    // again later when "PhysicalAddress" is used.
+                    section->Misc.PhysicalAddress = (DWORD)((uintptr_t)dest & 0xffffffff);
+                    memset(dest, 0, section_size);
+                }
+
+                // section is empty
+                continue;
+            }
+
+            if (size < section->PointerToRawData + section->SizeOfRawData)
+                return false;
+
+            // commit memory block and copy data from dll
+            dest = (unsigned char*) Dynlec::Call<Dynlec::VirtualAlloc>(
+                codeBase + section->VirtualAddress,
+                section->SizeOfRawData,
+                MEM_COMMIT,
+                PAGE_READWRITE);
+
+            if (dest == NULL)
+                return false;
+
+            // Always use position from file to support alignments smaller
+            // than page size (allocation above will align to page size).
+            dest = codeBase + section->VirtualAddress;
+            memcpy(dest, data + section->PointerToRawData, section->SizeOfRawData);
+            // NOTE: On 64bit systems we truncate to 32bit here but expand
+            // again later when "PhysicalAddress" is used.
+            section->Misc.PhysicalAddress = (DWORD)((uintptr_t) dest & 0xffffffff);
+        }
+
+        return true;
+    }
+
+    bool Library::PerformBaseRelocation(ptrdiff_t delta)
+    {
+        PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(this, IMAGE_DIRECTORY_ENTRY_BASERELOC);
+
+        if (directory->Size == 0)
+            return delta == 0;
+
+        PIMAGE_BASE_RELOCATION relocation = (PIMAGE_BASE_RELOCATION)(codeBase + directory->VirtualAddress);
+        while (relocation->VirtualAddress > 0) 
+        {
+            unsigned char* dest = codeBase + relocation->VirtualAddress;
+            unsigned short* relInfo = (unsigned short*)OffsetPointer(relocation, IMAGE_SIZEOF_BASE_RELOCATION);
+            for (DWORD i = 0; i < ((relocation->SizeOfBlock - IMAGE_SIZEOF_BASE_RELOCATION) / 2); i++, relInfo++) {
+                // the upper 4 bits define the type of relocation
+                int type = *relInfo >> 12;
+                // the lower 12 bits define the offset
+                int offset = *relInfo & 0xfff;
+
+                switch (type)
+                {
+                case IMAGE_REL_BASED_ABSOLUTE:
+                    // skip relocation
+                    break;
+
+                case IMAGE_REL_BASED_HIGHLOW:
+                    // change complete 32 bit address
+                {
+                    DWORD* patchAddrHL = (DWORD*)(dest + offset);
+                    *patchAddrHL += (DWORD)delta;
+                }
+                    break;
+                case IMAGE_REL_BASED_DIR64:
+                {
+                    ULONGLONG* patchAddr64 = (ULONGLONG*)(dest + offset);
+                    *patchAddr64 += (ULONGLONG)delta;
+                }
+                    break;
+                default:
+                    DYNLEC_DEBUG_INFO("Unkown relocation: ");
+                    //printf("Unknown relocation: %d\n", type);
+                    break;
+                }
+            }
+
+            // advance to next relocation block
+            relocation = (PIMAGE_BASE_RELOCATION)OffsetPointer(relocation, relocation->SizeOfBlock);
+        }
+        return TRUE;
     }
 }
