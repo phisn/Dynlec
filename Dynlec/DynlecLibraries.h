@@ -35,6 +35,26 @@ namespace Dynlec
 		KernelLibrary,
 		"VirtualFree",
 		BOOL(__stdcall*)(LPVOID, SIZE_T, DWORD));
+	DYNLEC_QUICK_FUNC(
+		GetModuleHandleA,
+		KernelLibrary,
+		"GetModuleHandleA",
+		HMODULE(__stdcall*)(LPCSTR));
+	DYNLEC_QUICK_FUNC(
+		LoadLibraryA,
+		KernelLibrary,
+		"LoadLibraryA",
+		HMODULE(__stdcall*)(LPCSTR));
+	DYNLEC_QUICK_FUNC(
+		FreeLibrary,
+		KernelLibrary,
+		"FreeLibrary",
+		BOOL(__stdcall*)(HMODULE));
+	DYNLEC_QUICK_FUNC(
+		GetProcAddress,
+		KernelLibrary,
+		"GetProcAddress",
+		FARPROC(__stdcall*)(HMODULE, LPCSTR));
 
 	typedef enum _SHUTDOWN_ACTION {
 		ShutdownNoReboot,

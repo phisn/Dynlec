@@ -20,7 +20,7 @@ namespace Dynlec
 	private:
         PIMAGE_NT_HEADERS headers;
         unsigned char* codeBase;
-        void* modules;
+        void** modules;
         int numModules;
         bool initialized;
         bool isDLL;
@@ -36,5 +36,6 @@ namespace Dynlec
             size_t size, 
             PIMAGE_NT_HEADERS old_headers);
         bool PerformBaseRelocation(ptrdiff_t delta);
+        bool BuildImportTable();
 	};
 }

@@ -3,17 +3,17 @@
 #include "DynlecCommon.h"
 
 #ifdef _DEBUG
-#define DYNLEC_DEBUG_REPORT(text) ::Dynlec::Debug::Report(__FILE__, __LINE__, text)
+#define DYNLEC_DEBUG_REPORT(text, ...) ::Dynlec::Debug::Report(__FILE__, __LINE__, text, __VA_ARGS__)
 #define DYNLEC_DEBUG_INFO(text, ...) ::Dynlec::Debug::Info(__FILE__, __LINE__, text, __VA_ARGS__) 
 #else
 #define DYNLEC_DEBUG_REPORT() __noop
-#define DYNLEC_DEBUG_INFO()
+#define DYNLEC_DEBUG_INFO() __noop
 #endif
 
 #ifdef DYNLEC_CUSTOM_FATAL
-#define DYNLEC_HANDLE_FATAL(text) DYNLEC_DEBUG_REPORT(text); ::Dynlec::HandleFatal()
+#define DYNLEC_HANDLE_FATAL(text, ...) DYNLEC_DEBUG_REPORT(text, __VA_ARGS__); ::Dynlec::HandleFatal()
 #else
-#define DYNLEC_HANDLE_FATAL(text) DYNLEC_DEBUG_REPORT(text)
+#define DYNLEC_HANDLE_FATAL(text, ...) DYNLEC_DEBUG_REPORT(text, __VA_ARGS__)
 #endif
 
 namespace Dynlec
@@ -44,7 +44,7 @@ namespace Dynlec
 				<< "File: \"" << file << "\""
 				<< ", Line: \"" << line << "\""
 				<< ", Text: \"" << text << "\"";
-			ExpandArguments<0, Args...>(std::cout, Args...);
+			ExpandArguments<0, Args...>(std::cout, args...);
 			std::cout << std::endl;
 		}
 
@@ -55,28 +55,35 @@ namespace Dynlec
 			return GetCurrentProcessId() == processID;
 		}
 
+		template <typename... Args>
 		void Report(
 			std::string file,
 			int line,
-			std::string text)
+			std::string text,
+			Args... args)
 		{
 			if (HasConsoleWindow())
 			{
 				std::cout
 					<< "File: \"" << file << "\""
 					<< "Line: \"" << line << "\""
-					<< "Text: \"" << text << "\""
-					<< std::endl;
+					<< "Text: \"" << text << "\"";
+				ExpandArguments<0, Args...>(std::cout, args...);
+				std::cout << std::endl;
 			}
 			else
 			{
+				std::stringstream ss;
+				ss << "Text: \"" << text << "\"";
+				ExpandArguments<0, Args...>(ss, args...);
+
 				_CrtDbgReport(
 					_CRT_ERROR,
 					file.c_str(),
 					line,
 					NULL,
 					"$ls",
-					text.c_str());
+					ss.str().c_str());
 			}
 		}
 	}

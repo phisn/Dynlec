@@ -1,4 +1,4 @@
-/*
+
 #include "DynlecCaller.h"
 #include "DynlecLibraries.h"
 
@@ -48,8 +48,7 @@ private:
 	char path[MAX_PATH];
 };
 #include <Windows.h>
-*/
-#include <iostream>
+
 int main()
 {
 	/*
@@ -63,11 +62,7 @@ int main()
 
 	privileges.Privileges[0].Luid;
 	*/
-#define MACRO()
-
-	int i = 0;
-	MACRO(++i);
-	std::cout << i << std::endl;
+	
 	/*
 	BOOLEAN enabled;
 	std::cout << "rtlap_r: " << std::hex << (unsigned long) Dynlec::Call<Dynlec::RtlAdjustPrivilege>(

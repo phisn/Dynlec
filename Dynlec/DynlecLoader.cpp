@@ -169,7 +169,8 @@ namespace Dynlec
 
         if (size < old_header->OptionalHeader.SizeOfHeaders) 
         {
-            goto error;
+            DYNLEC_HANDLE_FATAL("Invalid image size");
+            return;
         }
 
         // commit memory for headers
@@ -178,6 +179,12 @@ namespace Dynlec
             old_header->OptionalHeader.SizeOfHeaders,
             MEM_COMMIT,
             PAGE_READWRITE);
+
+        if (headersBuffer == NULL)
+        {
+            DYNLEC_HANDLE_FATAL("Virtualalloc failed", GetLastError());
+            return;
+        }
 
         // copy PE header to code
         memcpy(headersBuffer, dos_header, old_header->OptionalHeader.SizeOfHeaders);
@@ -189,66 +196,76 @@ namespace Dynlec
         // copy sections from DLL file block to new memory location
         if (!CopySections((const unsigned char*) binary, size, old_header)) 
         {
-            goto error;
+            DYNLEC_HANDLE_FATAL("Failed to copy sections");
+            return;
         }
 
         // adjust base address of imported data
         locationDelta = (ptrdiff_t)(this->headers->OptionalHeader.ImageBase - old_header->OptionalHeader.ImageBase);
-        if (locationDelta != 0) {
-            isRelocated = PerformBaseRelocation(result, locationDelta);
+        if (locationDelta != 0) 
+        {
+            isRelocated = PerformBaseRelocation(locationDelta);
         }
-        else {
-            isRelocated = TRUE;
+        else 
+        {
+            isRelocated = true;
         }
 
         // load required dlls and adjust function table of imports
-        if (!BuildImportTable(result)) {
-            goto error;
+        if (!BuildImportTable()) 
+        {
+            DYNLEC_HANDLE_FATAL("Failed to handle fatal");
+            return;
         }
 
         // mark memory pages depending on section headers and release
         // sections that are marked as "discardable"
-        if (!FinalizeSections(result)) {
-            goto error;
+        if (!FinalizeSections(result)) 
+        {
+            DYNLEC_HANDLE_FATAL("Failed to finalize sections");
+            return;
         }
 
         // TLS callbacks are executed BEFORE the main loading
-        if (!ExecuteTLS(result)) {
-            goto error;
+        if (!ExecuteTLS(result)) 
+        {
+            DYNLEC_HANDLE_FATAL("Failed to execute tls callbacks");
+            return;
         }
 
         // get entry point of loaded library
-        if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) {
-            if (result->isDLL) {
+        if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) 
+        {
+            if (result->isDLL) 
+            {
                 DllEntryProc DllEntry = (DllEntryProc)(LPVOID)(codeBase + result->headers->OptionalHeader.AddressOfEntryPoint);
+
                 // notify library about attaching to process
-                BOOL successfull = (*DllEntry)((HINSTANCE)codeBase, DLL_PROCESS_ATTACH, 0);
-                if (!successfull) {
-                    SetLastError(ERROR_DLL_INIT_FAILED);
-                    goto error;
+                BOOL successfull = (*DllEntry)((HINSTANCE) codeBase, DLL_PROCESS_ATTACH, 0);
+                if (!successfull) 
+                {
+                    DYNLEC_HANDLE_FATAL("Failed to initialize dll", GetLastError());
+                    return;
                 }
-                result->initialized = TRUE;
+
+                result->initialized = true;
             }
-            else {
+            else 
+            {
                 result->exeEntry = (ExeEntryProc)(LPVOID)(codeBase + result->headers->OptionalHeader.AddressOfEntryPoint);
             }
         }
-        else {
+        else 
+        {
             result->exeEntry = NULL;
         }
-
-        return (HMEMORYMODULE)result;
-
-    error:
-        // cleanup
-        MemoryFreeLibrary(result);
-        return NULL;
     }
 
     void Library::FreePointerList(POINTER_LIST* head)
     {
         POINTER_LIST* node = head;
-        while (node) {
+        while (node) 
+        {
             POINTER_LIST* next;
             Dynlec::Call<Dynlec::VirtualFree>(
                 node->address,
@@ -274,7 +291,8 @@ namespace Dynlec
                 // section doesn't contain data in the dll itself, but may define
                 // uninitialized data
                 int section_size = old_headers->OptionalHeader.SectionAlignment;
-                if (section_size > 0) {
+                if (section_size > 0) 
+                {
                     dest = (unsigned char*) Dynlec::Call<Dynlec::VirtualAlloc>(
                         codeBase + section->VirtualAddress,
                         section_size,
@@ -282,7 +300,10 @@ namespace Dynlec
                         PAGE_READWRITE);
 
                     if (dest == NULL)
+                    {
+                        DYNLEC_DEBUG_INFO("Virtualalloc failed", GetLastError());
                         return false;
+                    }
                     
                     // Always use position from file to support alignments smaller
                     // than page size (allocation above will align to page size).
@@ -333,7 +354,7 @@ namespace Dynlec
         while (relocation->VirtualAddress > 0) 
         {
             unsigned char* dest = codeBase + relocation->VirtualAddress;
-            unsigned short* relInfo = (unsigned short*)OffsetPointer(relocation, IMAGE_SIZEOF_BASE_RELOCATION);
+            unsigned short* relInfo = (unsigned short*) OffsetPointer(relocation, IMAGE_SIZEOF_BASE_RELOCATION);
             for (DWORD i = 0; i < ((relocation->SizeOfBlock - IMAGE_SIZEOF_BASE_RELOCATION) / 2); i++, relInfo++) {
                 // the upper 4 bits define the type of relocation
                 int type = *relInfo >> 12;
@@ -360,15 +381,77 @@ namespace Dynlec
                 }
                     break;
                 default:
-                    DYNLEC_DEBUG_INFO("Unkown relocation: ");
-                    //printf("Unknown relocation: %d\n", type);
+                    DYNLEC_DEBUG_INFO("Unkown relocation: ", type);
                     break;
                 }
             }
 
             // advance to next relocation block
-            relocation = (PIMAGE_BASE_RELOCATION)OffsetPointer(relocation, relocation->SizeOfBlock);
+            relocation = (PIMAGE_BASE_RELOCATION) OffsetPointer(relocation, relocation->SizeOfBlock);
         }
-        return TRUE;
+
+        return true;
+    }
+
+    bool Library::BuildImportTable()
+    {
+        PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(this, IMAGE_DIRECTORY_ENTRY_IMPORT);
+        if (directory->Size == 0)
+            return true;
+
+        PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR)(codeBase + directory->VirtualAddress);
+        for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) {
+            uintptr_t* thunkRef;
+            FARPROC* funcRef;
+
+            HMODULE handle = Dynlec::Call<Dynlec::LoadLibraryA>(
+                (LPCSTR)(codeBase + importDesc->Name));
+
+            if (handle == NULL)
+            {
+                DYNLEC_DEBUG_INFO("Loadlibrary failed", GetLastError());
+                return false;
+            }
+
+            modules = (void**) realloc(modules, (numModules + 1) * (sizeof(HMODULE)));
+            if (modules == NULL) 
+            {
+                DYNLEC_DEBUG_INFO("Realloc failed");
+                Dynlec::Call<Dynlec::FreeLibrary>(handle);
+                return false;
+            }
+
+            modules[numModules++] = handle;
+
+            thunkRef = (uintptr_t*)(codeBase + importDesc->OriginalFirstThunk
+                ? importDesc->OriginalFirstThunk
+                : importDesc->FirstThunk);
+            funcRef = (FARPROC*)(codeBase + importDesc->FirstThunk);
+
+            for (; *thunkRef; thunkRef++, funcRef++) {
+                if (IMAGE_SNAP_BY_ORDINAL(*thunkRef)) 
+                {
+                    *funcRef = Dynlec::Call<Dynlec::GetProcAddress>(
+                        handle,
+                        (LPCSTR)IMAGE_ORDINAL(*thunkRef));
+                }
+                else 
+                {
+                    PIMAGE_IMPORT_BY_NAME thunkData = (PIMAGE_IMPORT_BY_NAME)(codeBase + (*thunkRef));
+                    *funcRef = Dynlec::Call<Dynlec::GetProcAddress>(
+                        handle,
+                        (LPCSTR) &thunkData->Name);
+                }
+
+                if (*funcRef == 0) 
+                {
+                    DYNLEC_DEBUG_INFO("GetProcAddress failed", GetLastError());
+                    Dynlec::Call<Dynlec::FreeLibrary>(handle);
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 }
