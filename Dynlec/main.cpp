@@ -1,76 +1,17 @@
+#include "DynlecLoader.h"
 
-#include "DynlecCaller.h"
-#include "DynlecLibraries.h"
-
-#include <iostream>
-#include <vector>
-
-class Volume
-{
-public:
-	static std::vector<Volume> Volumes()
-	{
-		std::vector<Volume> volumes;
-
-		HANDLE handle = Dynlec::Call<Dynlec::FindFirstVolumeA>(
-			volumes.emplace_back().path,
-			MAX_PATH);
-
-		while (Dynlec::Call<Dynlec::FindNextVolumeA>(
-			handle,
-			volumes.emplace_back().path,
-			MAX_PATH));
-
-		volumes.pop_back();
-
-#ifdef _DEBUG
-		if (GetLastError() != ERROR_NO_MORE_FILES)
-		{
-			std::cout << "FindNextVolume failed: " << GetLastError() << std::endl;
-		}
-#endif
-
-		Dynlec::Call<Dynlec::FindVolumeClose>(handle);
-
-		return volumes;
-	}
-
-	Volume()
-	{
-	}
-
-	const char* getPath() const
-	{
-		return path;
-	}
-
-private:
-	char path[MAX_PATH];
-};
-#include <Windows.h>
+#include <filesystem>
+#include <fstream>
 
 int main()
 {
-	/*
-	std::vector<Volume> volumes = Volume::Volumes();
+	int buffer_size = std::filesystem::file_size("helloworld.exe");
+	char* buffer = new char[buffer_size];
 
-	for (Volume& volume : volumes)
-		std::cout << "V: " << volume.getPath() << std::endl;
+	std::ifstream ifs("helloworld.exe", std::ios::binary);
+	ifs.read(buffer, buffer_size);
 
-	TOKEN_PRIVILEGES privileges;
-	HANDLE token;
-
-	privileges.Privileges[0].Luid;
-	*/
-	
-	/*
-	BOOLEAN enabled;
-	std::cout << "rtlap_r: " << std::hex << (unsigned long) Dynlec::Call<Dynlec::RtlAdjustPrivilege>(
-		19,
-		TRUE,
-		FALSE,
-		&enabled) << std::endl;
-	std::cout << "ntss_r: " << std::hex << (unsigned long) Dynlec::Call<Dynlec::NtShutdownSystem>(
-		Dynlec::ShutdownPowerOff) << std::endl;
-		*/
+	Dynlec::Library helloworld(buffer, buffer_size);
+	// helloworld.callEntryPoint();
+	// helloworld.getProcAddress("test");
 }

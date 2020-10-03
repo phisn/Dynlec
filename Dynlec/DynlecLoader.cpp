@@ -3,15 +3,6 @@
 #include <sysinfoapi.h>
 #include <winnt.h>
 
-struct ExportNameEntry {
-    const char* name;
-    unsigned short idx;
-};
-
-typedef int (__stdcall* DllEntryProc)(void* hinstDLL, unsigned long fdwReason, void* lpReserved);
-typedef int (__stdcall* ExeEntryProc)(void);
-
-
 #ifndef IMAGE_SIZEOF_BASE_RELOCATION
 // Vista SDKs no longer define IMAGE_SIZEOF_BASE_RELOCATION!?
 #define IMAGE_SIZEOF_BASE_RELOCATION (sizeof(IMAGE_BASE_RELOCATION))
@@ -21,6 +12,18 @@ typedef int (__stdcall* ExeEntryProc)(void);
 
 namespace Dynlec
 {
+    constexpr int ProtectionFlags[2][2][2] = 
+    {    
+        {   // not executable
+            {PAGE_NOACCESS, PAGE_WRITECOPY},
+            {PAGE_READONLY, PAGE_READWRITE},
+        }, 
+        {   // executable
+            {PAGE_EXECUTE, PAGE_EXECUTE_WRITECOPY},
+            {PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE},
+        },
+    };
+
     inline uintptr_t AlignValueDown(uintptr_t value, uintptr_t alignment) {
         return value & ~(alignment - 1);
     }
@@ -39,10 +42,9 @@ namespace Dynlec
 
     Library::Library(const char* binary, size_t size)
     {
-        unsigned char* codeBase, * headersBuffer;
+        unsigned char* headersBuffer;
         ptrdiff_t locationDelta;
         SYSTEM_INFO sysInfo;
-        unsigned long i;
         size_t lastSectionEnd = 0;
         size_t alignedImageSize;
 
@@ -87,7 +89,7 @@ namespace Dynlec
 
         PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(old_header);
         size_t optionalSectionSize = old_header->OptionalHeader.SectionAlignment;
-        for (i = 0; i < old_header->FileHeader.NumberOfSections; i++, section++) 
+        for (unsigned long i = 0; i < old_header->FileHeader.NumberOfSections; i++, section++)
         {
             size_t endOfSection = section->SizeOfRawData == 0
                 // Section without data in the DLL
@@ -119,7 +121,7 @@ namespace Dynlec
         {
             // try to allocate memory at arbitrary position
             codeBase = (unsigned char*) Dynlec::Call<Dynlec::VirtualAlloc>(
-                NULL,
+                (void*) NULL,
                 alignedImageSize,
                 MEM_RESERVE | MEM_COMMIT,
                 PAGE_READWRITE);
@@ -152,7 +154,7 @@ namespace Dynlec
             blockedMemory = node;
 
             codeBase = (unsigned char*) Dynlec::Call<Dynlec::VirtualAlloc>(
-                NULL,
+                (void*) NULL,
                 alignedImageSize,
                 MEM_RESERVE | MEM_COMMIT,
                 PAGE_READWRITE);
@@ -220,25 +222,25 @@ namespace Dynlec
 
         // mark memory pages depending on section headers and release
         // sections that are marked as "discardable"
-        if (!FinalizeSections(result)) 
+        if (!FinalizeSections()) 
         {
             DYNLEC_HANDLE_FATAL("Failed to finalize sections");
             return;
         }
 
         // TLS callbacks are executed BEFORE the main loading
-        if (!ExecuteTLS(result)) 
+        if (!ExecuteTLS()) 
         {
             DYNLEC_HANDLE_FATAL("Failed to execute tls callbacks");
             return;
         }
 
         // get entry point of loaded library
-        if (result->headers->OptionalHeader.AddressOfEntryPoint != 0) 
+        if (headers->OptionalHeader.AddressOfEntryPoint != 0) 
         {
-            if (result->isDLL) 
+            if (isDLL) 
             {
-                DllEntryProc DllEntry = (DllEntryProc)(LPVOID)(codeBase + result->headers->OptionalHeader.AddressOfEntryPoint);
+                DllEntryProc DllEntry = (DllEntryProc)(LPVOID)(codeBase + headers->OptionalHeader.AddressOfEntryPoint);
 
                 // notify library about attaching to process
                 BOOL successfull = (*DllEntry)((HINSTANCE) codeBase, DLL_PROCESS_ATTACH, 0);
@@ -248,17 +250,187 @@ namespace Dynlec
                     return;
                 }
 
-                result->initialized = true;
+                initialized = true;
             }
             else 
             {
-                result->exeEntry = (ExeEntryProc)(LPVOID)(codeBase + result->headers->OptionalHeader.AddressOfEntryPoint);
+                exeEntry = (ExeEntryProc)(LPVOID)(codeBase + headers->OptionalHeader.AddressOfEntryPoint);
             }
         }
         else 
         {
-            result->exeEntry = NULL;
+            exeEntry = NULL;
         }
+
+        loaded = true;
+    }
+
+    Library::~Library()
+    {
+        if (initialized)
+        {
+            // notify library about detaching from process
+            DllEntryProc DllEntry = (DllEntryProc)(LPVOID)(codeBase + headers->OptionalHeader.AddressOfEntryPoint);
+            (*DllEntry)((HINSTANCE) codeBase, DLL_PROCESS_DETACH, 0);
+        }
+
+        if (nameExportsTable)
+        {
+            free(nameExportsTable);
+        }
+
+        if (modules)
+        {
+            // free previously opened libraries
+            for (int i = 0; i < numModules; i++)
+                if (modules[i] != NULL)
+                {
+                    Dynlec::Call<Dynlec::FreeLibrary>((HMODULE) modules[i]);
+                }
+
+            free(modules);
+        }
+
+        if (codeBase)
+        {
+            Dynlec::Call<Dynlec::VirtualFree>(codeBase, 0, MEM_RELEASE);
+        }
+
+        FreePointerList(blockedMemory);
+    }
+
+    FARPROC Library::getProcAddress(LPCSTR name)
+    {
+        if (loaded == false)
+        {
+            DYNLEC_HANDLE_FATAL("Unable to get procaddress of unloaded library", name);
+            return NULL;
+        }
+
+        DWORD idx = 0;
+        PIMAGE_EXPORT_DIRECTORY exports;
+        PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(this, IMAGE_DIRECTORY_ENTRY_EXPORT);
+        if (directory->Size == 0) 
+        {
+            // no export table found
+            DYNLEC_HANDLE_FATAL("Export table not found", name);
+            return NULL;
+        }
+
+        exports = (PIMAGE_EXPORT_DIRECTORY)(codeBase + directory->VirtualAddress);
+        if (exports->NumberOfNames == 0 || exports->NumberOfFunctions == 0) 
+        {
+            // DLL doesn't export anything
+            DYNLEC_HANDLE_FATAL("No exports found", name);
+            return NULL;
+        }
+
+        if (HIWORD(name) == 0) 
+        {
+            // load function by ordinal value
+            if (LOWORD(name) < exports->Base) 
+            {
+                DYNLEC_HANDLE_FATAL("Export not found. Invalid size", name);
+                return NULL;
+            }
+
+            idx = LOWORD(name) - exports->Base;
+        }
+        else 
+        {
+            // Lazily build name table and sort it by names
+            if (!nameExportsTable)
+            {
+                DWORD* nameRef = (DWORD*)(codeBase + exports->AddressOfNames);
+                WORD* ordinal = (WORD*)(codeBase + exports->AddressOfNameOrdinals);
+                
+                ExportNameEntry* entry = (ExportNameEntry*) malloc(exports->NumberOfNames * sizeof(ExportNameEntry));
+                nameExportsTable = entry;
+                
+                if (!entry) 
+                {
+                    DYNLEC_HANDLE_FATAL("Out of memory", name);
+                    return NULL;
+                }
+
+                for (DWORD i = 0; i < exports->NumberOfNames; i++, nameRef++, ordinal++, entry++) 
+                {
+                    entry->name = (const char*)(codeBase + (*nameRef));
+                    entry->idx = *ordinal;
+                }
+
+                qsort(
+                    nameExportsTable,
+                    exports->NumberOfNames,
+                    sizeof(ExportNameEntry),
+                    [](const void* l, const void* r) -> int
+                    {
+                        return strcmp(
+                            ((const struct ExportNameEntry*)l)->name,
+                            ((const struct ExportNameEntry*)r)->name);
+                    });
+            }
+
+            // search function name in list of exported names with binary search
+            const ExportNameEntry* found = (const struct ExportNameEntry*)bsearch(&name,
+                nameExportsTable,
+                exports->NumberOfNames,
+                sizeof(ExportNameEntry),
+                [](const void* inner, const void* outter) -> int
+                {
+                    return strcmp(
+                        *(LPCSTR*) inner,
+                        ((const struct ExportNameEntry*) outter)->name);
+                });
+            
+            if (!found) 
+            {
+                // exported symbol not found
+                DYNLEC_HANDLE_FATAL("Symbol not found", name);
+                return NULL;
+            }
+
+            idx = found->idx;
+        }
+
+        if (idx > exports->NumberOfFunctions) 
+        {
+            // name <-> ordinal number don't match
+            DYNLEC_HANDLE_FATAL("Symbol not found. Invalid ordinal numer", name);
+            return NULL;
+        }
+
+        // AddressOfFunctions contains the RVAs to the "real" functions
+        return (FARPROC)(LPVOID)(codeBase + (*(DWORD*)(codeBase + exports->AddressOfFunctions + (idx * 4))));
+    }
+
+    int Library::callEntryPoint()
+    {
+        if (loaded == false)
+        {
+            DYNLEC_HANDLE_FATAL("Unable to call entry point of unloaded library");
+            return -1;
+        }
+
+        if (isDLL)
+        {
+            DYNLEC_HANDLE_FATAL("Unable to call entrypoint on dll");
+            return -1;
+        }
+
+        if (exeEntry == NULL)
+        {
+            DYNLEC_HANDLE_FATAL("Library has no entrypoint");
+            return -1;
+        }
+
+        if (!isRelocated)
+        {
+            DYNLEC_HANDLE_FATAL("Library is not relocated. Unable to call entrypoint");
+            return -1;
+        }
+
+        return exeEntry();
     }
 
     void Library::FreePointerList(POINTER_LIST* head)
@@ -293,8 +465,9 @@ namespace Dynlec
                 int section_size = old_headers->OptionalHeader.SectionAlignment;
                 if (section_size > 0) 
                 {
-                    dest = (unsigned char*) Dynlec::Call<Dynlec::VirtualAlloc>(
-                        codeBase + section->VirtualAddress,
+                    dest = (unsigned char*) // Dynlec::Call<Dynlec::VirtualAlloc>(
+                        ::VirtualAlloc(
+                        (LPVOID)(codeBase + section->VirtualAddress),
                         section_size,
                         MEM_COMMIT,
                         PAGE_READWRITE);
@@ -400,9 +573,10 @@ namespace Dynlec
             return true;
 
         PIMAGE_IMPORT_DESCRIPTOR importDesc = (PIMAGE_IMPORT_DESCRIPTOR)(codeBase + directory->VirtualAddress);
-        for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) {
-            uintptr_t* thunkRef;
-            FARPROC* funcRef;
+        for (; !IsBadReadPtr(importDesc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) && importDesc->Name; importDesc++) 
+        {
+            // uintptr_t* thunkRef;
+            // FARPROC* funcRef;
 
             HMODULE handle = Dynlec::Call<Dynlec::LoadLibraryA>(
                 (LPCSTR)(codeBase + importDesc->Name));
@@ -423,11 +597,11 @@ namespace Dynlec
 
             modules[numModules++] = handle;
 
-            thunkRef = (uintptr_t*)(codeBase + importDesc->OriginalFirstThunk
-                ? importDesc->OriginalFirstThunk
-                : importDesc->FirstThunk);
-            funcRef = (FARPROC*)(codeBase + importDesc->FirstThunk);
-
+            uintptr_t* thunkRef = importDesc->OriginalFirstThunk
+                ? (uintptr_t*)(codeBase + importDesc->OriginalFirstThunk)
+                : (uintptr_t*)(codeBase + importDesc->FirstThunk);
+            FARPROC* funcRef = (FARPROC*)(codeBase + importDesc->FirstThunk);
+            
             for (; *thunkRef; thunkRef++, funcRef++) {
                 if (IMAGE_SNAP_BY_ORDINAL(*thunkRef)) 
                 {
@@ -451,6 +625,141 @@ namespace Dynlec
                 }
             }
         }
+
+        return true;
+    }
+
+    bool Library::FinalizeSections()
+    {
+        
+        // "PhysicalAddress" might have been truncated to 32bit above, expand to
+        // 64bits again.
+        uintptr_t imageOffset = ((uintptr_t) headers->OptionalHeader.ImageBase & 0xffffffff00000000);
+
+        SECTIONFINALIZEDATA sectionData;
+        PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(headers);
+
+        sectionData.characteristics = section->Characteristics;
+        sectionData.last = false;
+
+        sectionData.address = (LPVOID)((uintptr_t)section->Misc.PhysicalAddress | imageOffset);
+        sectionData.alignedAddress = AlignAddressDown(sectionData.address, pageSize);
+        sectionData.size = GetRealSectionSize(section);
+
+        section++;
+
+        // loop through all sections and change access flags
+        for (int i = 1; i < headers->FileHeader.NumberOfSections; i++, section++) {
+            LPVOID sectionAddress = (LPVOID)((uintptr_t)section->Misc.PhysicalAddress | imageOffset);
+            LPVOID alignedAddress = AlignAddressDown(sectionAddress, pageSize);
+            SIZE_T sectionSize = GetRealSectionSize(section);
+
+            // Combine access flags of all sections that share a page
+            // TODO(fancycode): We currently share flags of a trailing large section
+            //   with the page of a first small section. This should be optimized.
+            if (sectionData.alignedAddress == alignedAddress || (uintptr_t)sectionData.address + sectionData.size > (uintptr_t) alignedAddress) {
+                // Section shares page with previous
+                if ((section->Characteristics & IMAGE_SCN_MEM_DISCARDABLE) == 0 || (sectionData.characteristics & IMAGE_SCN_MEM_DISCARDABLE) == 0) {
+                    sectionData.characteristics = (sectionData.characteristics | section->Characteristics) & ~IMAGE_SCN_MEM_DISCARDABLE;
+                }
+                else {
+                    sectionData.characteristics |= section->Characteristics;
+                }
+                sectionData.size = (((uintptr_t)sectionAddress) + ((uintptr_t)sectionSize)) - (uintptr_t)sectionData.address;
+                continue;
+            }
+
+            if (!FinalizeSection(&sectionData))
+                return false;
+
+            sectionData.address = sectionAddress;
+            sectionData.alignedAddress = alignedAddress;
+            sectionData.size = sectionSize;
+            sectionData.characteristics = section->Characteristics;
+        }
+
+        sectionData.last = true;
+
+        return FinalizeSection(&sectionData);
+    }
+
+    bool Library::FinalizeSection(PSECTIONFINALIZEDATA sectionData) 
+    {
+        if (sectionData->size == 0)
+            return true;
+
+        if (sectionData->characteristics & IMAGE_SCN_MEM_DISCARDABLE) 
+        {
+            // section is not needed any more and can safely be freed
+            if (sectionData->address == sectionData->alignedAddress
+            && (sectionData->last || headers->OptionalHeader.SectionAlignment == pageSize || (sectionData->size % pageSize) == 0))
+            {
+                // Only allowed to decommit whole pages
+                Dynlec::Call<Dynlec::VirtualFree>(
+                    sectionData->address,
+                    sectionData->size,
+                    MEM_DECOMMIT);
+            }
+
+            return true;
+        }
+
+        // determine protection flags based on characteristics
+        int executable = (sectionData->characteristics & IMAGE_SCN_MEM_EXECUTE) != 0;
+        int readable = (sectionData->characteristics & IMAGE_SCN_MEM_READ) != 0;
+        int writeable = (sectionData->characteristics & IMAGE_SCN_MEM_WRITE) != 0;
+        DWORD protect = ProtectionFlags[executable][readable][writeable];
+
+        if (sectionData->characteristics & IMAGE_SCN_MEM_NOT_CACHED)
+            protect |= PAGE_NOCACHE;
+
+        // change memory access flags
+        if (DWORD oldProtect; Dynlec::Call<Dynlec::VirtualProtect>(
+                sectionData->address,
+                sectionData->size,
+                protect,
+                &oldProtect) == 0)
+        {
+            DYNLEC_DEBUG_INFO("Virtualprotect failed", GetLastError());
+            return false;
+        }
+
+        return true;
+    }
+
+    size_t Library::GetRealSectionSize(PIMAGE_SECTION_HEADER section) 
+    {
+        DWORD size = section->SizeOfRawData;
+
+        if (size == 0)
+        {
+            size = section->Characteristics & IMAGE_SCN_CNT_INITIALIZED_DATA
+                ? headers->OptionalHeader.SizeOfInitializedData
+                : headers->OptionalHeader.SizeOfUninitializedData;
+        }
+
+        return (size_t) size;
+    }
+
+    bool Library::ExecuteTLS()
+    {
+        PIMAGE_TLS_DIRECTORY tls;
+        PIMAGE_TLS_CALLBACK* callback;
+
+        PIMAGE_DATA_DIRECTORY directory = GET_HEADER_DICTIONARY(this, IMAGE_DIRECTORY_ENTRY_TLS);
+
+        if (directory->VirtualAddress == 0)
+            return true;
+
+        tls = (PIMAGE_TLS_DIRECTORY)(codeBase + directory->VirtualAddress);
+        callback = (PIMAGE_TLS_CALLBACK*) tls->AddressOfCallBacks;
+
+        if (callback) 
+            while (*callback) 
+            {
+                (*callback)((LPVOID)codeBase, DLL_PROCESS_ATTACH, NULL);
+                callback++;
+            }
 
         return true;
     }

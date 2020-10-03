@@ -52,8 +52,7 @@ namespace Dynlec
 
 			if (Function::Library::Module == NULL)
 			{
-				if (HandleFailedLoadLibrary)
-					DYNLEC_HANDLE_FATAL(std::to_string(GetLastError()) + ':' + Function::Library::Name);
+				DYNLEC_HANDLE_FATAL("Loadlibrary failed", GetLastError(), Obtain(&Function::Library::Name));
 			}
 		}
 
@@ -65,8 +64,7 @@ namespace Dynlec
 
 			if (Function::Procedure == NULL)
 			{
-				if (HandleFailedGetProcAddress)
-					DYNLEC_HANDLE_FATAL(std::to_string(GetLastError()) + ':' + Function::Name);
+				DYNLEC_HANDLE_FATAL("Getprocaddress failed", GetLastError(), Obtain(&Function::Name));
 			}
 		}
 
