@@ -107,5 +107,3 @@ namespace Dynlec
         const CTEncrypt<size, counter> cte;
     };
 }
-
-static_assert(sizeof(char) == 1, "DynlecEncrypt is made for character size of 1");
