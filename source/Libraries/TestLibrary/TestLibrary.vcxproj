@@ -80,12 +80,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="Interface.h" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="..\..\Dynlec\Dynlec.vcxproj">
       <Project>{d757d30f-1607-4c64-97f6-f9ae0d085815}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Interface.dynlec" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
